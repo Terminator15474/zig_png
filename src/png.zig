@@ -1,6 +1,6 @@
 const std = @import("std");
 const assert = std.debug.assert;
-const rl = @import("raylib");
+const render = @import("render.zig");
 
 pub const png_error = error{
     FileIsNoPng,
@@ -22,6 +22,7 @@ pub const png_error = error{
     OutOfMemory,
     EndOfStream,
     Canceled,
+    DivisionByZero,
 
     // zlib errors
     NoSpaceLeft,
@@ -30,24 +31,37 @@ pub const png_error = error{
     WrongGzipChecksum,
     WrongGzipSize,
     WrongZlibChecksum,
+
     InvalidCode,
+
     OversubscribedHuffmanTree,
+
     IncompleteHuffmanTree,
+
     MissingEndOfBlockCode,
+
     InvalidMatch,
+
     InvalidBlockType,
+
     WrongStoredBlockNlen,
+
     InvalidDynamicBlockHeader,
 
     // utf8 url
+
     Utf8ExpectedContinuation,
+
     Utf8OverlongEncoding,
+
     Utf8EncodesSurrogateHalf,
+
     Utf8CodepointTooLarge,
 };
 
-const png_data = struct {
+pub const png_data = struct {
     const Self = @This();
+
     width: u32,
     height: u32,
     bit_depth: u8,
@@ -55,6 +69,7 @@ const png_data = struct {
     compression: u8,
     filter: u8,
     interlace: u8,
+    bpp: u8,
     pixels: ?[]u8,
 
     pub fn getPixel(self: *Self, x: usize, y: usize) u8 {
@@ -108,6 +123,7 @@ pub fn open(file_reader: anytype, allocator: std.mem.Allocator) png_error!png_da
         .compression = 0,
         .filter = 0,
         .interlace = 0,
+        .bpp = 0,
         .pixels = null,
     };
 
@@ -153,20 +169,34 @@ fn handle_IHDR(buf: []u8) png_error!png_data {
 
     const width = try reader.readInt(u32, .big);
     const height = try reader.readInt(u32, .big);
-    const bit = try reader.readInt(u8, .big);
+    const bit_depth = try reader.readInt(u8, .big);
     const color = try reader.readInt(u8, .big);
     const compression = try reader.readInt(u8, .big);
     const filter = try reader.readInt(u8, .big);
     const interlace = try reader.readInt(u8, .big);
 
+    var bpp: u8 = bit_depth;
+    // cannot just return something at runtime :(
+    switch (color) {
+        // returns number of chanels
+        inline 0 => bpp *= 1,
+        inline 2 => bpp *= 3,
+        inline 3 => bpp *= 3,
+        inline 4 => bpp *= 2,
+        inline 6 => bpp *= 4,
+        else => unreachable,
+    }
+    bpp = try std.math.divCeil(u8, bpp, 8);
+
     const data = png_data{
         .width = width,
         .height = height,
-        .bit_depth = bit,
+        .bit_depth = bit_depth,
         .color = color,
         .compression = compression,
         .filter = filter,
         .interlace = interlace,
+        .bpp = bpp,
         .pixels = null,
     };
     std.log.debug("IDAT: {any}", .{data});
@@ -190,70 +220,41 @@ fn handle_IDAT(allocator: std.mem.Allocator, img_data: *png_data, buf: []u8) !vo
     var br = std.io.bitReader(.big, decompressed_reader);
     var out_bits: usize = @as(usize, 0);
 
-    const pixel_data = try allocator.alloc(u8, img_data.width * img_data.height);
+    const byte_width = img_data.width * img_data.bpp; // number ob bytes per scanline
+    var pixel_data = try allocator.alloc(u8, img_data.height * byte_width);
 
-    // iterate over every pixel
-    for (pixel_data, 0..) |_, i| {
-        if (i % img_data.width == 0) {
-            const filtered = try br.readBits(u8, 8, &out_bits);
-            _ = filtered;
-            continue;
+    for (0..img_data.height) |y| {
+        const filter_type = try br.readBits(u8, 8, &out_bits);
+        std.log.debug("Filtered: {d}", .{filter_type});
+        // read all pixels in the scanline
+        for (0..byte_width) |x| {
+            pixel_data[img_data.width * y + x] = try br.readBits(u8, img_data.bit_depth, &out_bits);
         }
-        pixel_data[i] = try br.readBits(u8, img_data.bit_depth, &out_bits);
+        handleFilter(filter_type, pixel_data[byte_width * y .. byte_width * y + byte_width].ptr, img_data);
+        std.mem.reverse(u8, pixel_data[byte_width * y .. byte_width * y + byte_width]);
     }
     img_data.pixels = pixel_data;
 }
 
-pub fn view(img_data: *png_data) !void {
-    rl.initWindow(u2i(img_data.width * 3), u2i(img_data.height * 3), "zig-png - example");
-    defer rl.closeWindow();
-    rl.setTargetFPS(60);
-    while (!rl.windowShouldClose()) { // Detect window close button or ESC key
-        // Update
-        //----------------------------------------------------------------------------------
-        // TODO: Update your variables here
-        //----------------------------------------------------------------------------------
-
-        // Draw
-        //----------------------------------------------------------------------------------
-        rl.beginDrawing();
-        defer rl.endDrawing();
-
-        rl.clearBackground(rl.Color.white);
-
-        for (0..img_data.height) |x| {
-            for (0..img_data.width) |y| {
-                const pixel = img_data.getPixel(x, y);
-                if (pixel == 1) {
-                    rl.drawPixel(u2i(x * 3), u2i(x * 3), rl.Color.white);
-                    rl.drawPixel(u2i(x * 3 + 1), u2i(y * 3), rl.Color.white);
-                    rl.drawPixel(u2i(x * 3 + 2), u2i(y * 3), rl.Color.white);
-
-                    rl.drawPixel(u2i(x * 3), u2i(x * 3 + 1), rl.Color.white);
-                    rl.drawPixel(u2i(x * 3 + 1), u2i(y * 3 + 1), rl.Color.white);
-                    rl.drawPixel(u2i(x * 3 + 2), u2i(y * 3 + 1), rl.Color.white);
-
-                    rl.drawPixel(u2i(x * 3), u2i(x * 3 + 2), rl.Color.white);
-                    rl.drawPixel(u2i(x * 3 + 1), u2i(y * 3 + 2), rl.Color.white);
-                    rl.drawPixel(u2i(x * 3 + 2), u2i(y * 3 + 2), rl.Color.white);
-                } else {
-                    rl.drawPixel(u2i(x * 3), u2i(x * 3), rl.Color.black);
-                    rl.drawPixel(u2i(x * 3 + 1), u2i(y * 3), rl.Color.black);
-                    rl.drawPixel(u2i(x * 3 + 2), u2i(y * 3), rl.Color.black);
-
-                    rl.drawPixel(u2i(x * 3), u2i(x * 3 + 1), rl.Color.black);
-                    rl.drawPixel(u2i(x * 3 + 1), u2i(y * 3 + 1), rl.Color.black);
-                    rl.drawPixel(u2i(x * 3 + 2), u2i(y * 3 + 1), rl.Color.black);
-
-                    rl.drawPixel(u2i(x * 3), u2i(x * 3 + 2), rl.Color.black);
-                    rl.drawPixel(u2i(x * 3 + 1), u2i(y * 3 + 2), rl.Color.black);
-                    rl.drawPixel(u2i(x * 3 + 2), u2i(y * 3 + 2), rl.Color.black);
-                }
+fn handleFilter(filter: u8, buf: [*]u8, img_data: *png_data) void {
+    switch (filter) {
+        0 => return,
+        1 => {
+            for (0..img_data.width - 1) |x| {
+                const sub = buf[x - img_data.bpp];
+                buf[x] += sub;
             }
-        }
+        },
+        2 => {
+            unreachable;
+        },
+        3 => {
+            unreachable;
+        },
+        4 => {
+            unreachable;
+        },
+        else => unreachable,
     }
-}
-
-fn u2i(num: anytype) i32 {
-    return @intCast(num);
+    return;
 }
