@@ -1,5 +1,7 @@
 const std = @import("std");
 const png = @import("png.zig");
+const render = @import("render.zig");
+
 pub fn main() !void {
     // allocators
     var alloc = std.heap.ArenaAllocator.init(std.heap.page_allocator);
@@ -14,5 +16,6 @@ pub fn main() !void {
     var file = try std.fs.cwd().openFile(path, .{});
     defer file.close();
     var img_data = try png.open(file.reader(), alloc.allocator());
-    try png.view(&img_data);
+
+    try render.renderPngInWindow(1920, 1080, &img_data);
 }
