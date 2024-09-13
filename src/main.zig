@@ -1,8 +1,6 @@
 const std = @import("std");
 const png = @import("png.zig");
 pub fn main() !void {
-    // const stdout = std.io.getStdOut().writer();
-
     // allocators
     var alloc = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer _ = alloc.deinit();
