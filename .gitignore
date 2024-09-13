@@ -2,4 +2,4 @@
 zig-cache/**
 zig-windows-0.14.0/*
 zig-out/**
-build.zig.zon
+./build.zig.zon
