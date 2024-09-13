@@ -241,8 +241,9 @@ fn handleFilter(filter: u8, buf: [*]u8, img_data: *png_data) void {
         0 => return,
         1 => {
             for (0..img_data.width - 1) |x| {
-                const sub = buf[x - img_data.bpp];
-                buf[x] += sub;
+                const i = x -% img_data.bpp;
+                const sub = buf[i];
+                buf[x] +%= sub;
             }
         },
         2 => {
