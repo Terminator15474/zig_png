@@ -3,6 +3,7 @@ const std = @import("std");
 const png = @import("png.zig");
 
 pub fn renderPngInWindow(width: u32, height: u32, img_data: *png.png_data) !void {
+    rl.setTraceLogLevel(rl.TraceLogLevel.log_fatal);
     const scaleX = width / img_data.width;
     const scaleY = height / img_data.height;
 
@@ -18,13 +19,13 @@ pub fn renderPngInWindow(width: u32, height: u32, img_data: *png.png_data) !void
         for (0..img_data.height) |x| {
             for (0..img_data.width) |y| {
                 const pixel = getPixelRLColor(img_data.getPixel(x, y), img_data);
-                drawPixelScaled(@intCast(x), @intCast(y), scaleX, scaleY, pixel);
+                drawPixelScaledRL(@intCast(x), @intCast(y), scaleX, scaleY, pixel);
             }
         }
     }
 }
 
-fn drawPixelScaled(x: u32, y: u32, scaleX: u32, scaleY: u32, color: rl.Color) void {
+fn drawPixelScaledRL(x: u32, y: u32, scaleX: u32, scaleY: u32, color: rl.Color) void {
     for (0..scaleX) |i| {
         for (0..scaleY) |j| {
             rl.drawPixel(@intCast(x * scaleX + i), @intCast(y * scaleY + j), color);
@@ -32,7 +33,7 @@ fn drawPixelScaled(x: u32, y: u32, scaleX: u32, scaleY: u32, color: rl.Color) vo
     }
 }
 
-fn getPixelRLColor(pixel: u8, img_data: *png.png_data) rl.Color {
+fn getPixelRLColor(pixel: u8, img_data: *png.png_data) !rl.Color {
     const max_val = @as(f32, @floatFromInt(std.math.pow(u8, 2, img_data.bit_depth) - 1));
 
     switch (img_data.color) {
@@ -40,10 +41,25 @@ fn getPixelRLColor(pixel: u8, img_data: *png.png_data) rl.Color {
             const f32_pixel = @as(f32, @floatFromInt(pixel));
             const scaled_float: f32 = f32_pixel / max_val;
             const scaled_int = @as(u8, @intFromFloat(scaled_float * 255.0));
-            std.log.debug("max: {d}, f32: {d}, sf: {d}, u8: {d}", .{ max_val, f32_pixel, scaled_float, scaled_int });
             return rl.Color.init(scaled_int, scaled_int, scaled_int, 255);
         },
         2 => return rl.Color.init(pixel, pixel, pixel, 255),
         else => unreachable,
     }
+}
+
+pub fn renderPngToWriter(writer: anytype, width: u32, height: u32, img_data: *png.png_data) !void {
+    _ = width;
+    _ = height;
+    for (0..img_data.width) |x| {
+        for (0..img_data.height) |y| {
+            const pixel = img_data.getPixel(x, y);
+            try drawPixelANSI(try getPixelRLColor(pixel, img_data), writer);
+        }
+    }
+}
+
+fn drawPixelANSI(color: rl.Color, writer: anytype) !void {
+    _ = color;
+    _ = try writer.write("asdf");
 }
