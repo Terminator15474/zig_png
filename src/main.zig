@@ -11,7 +11,6 @@ pub fn main() !void {
     var args = try std.process.argsWithAllocator(alloc.allocator());
     _ = args.skip();
     defer args.deinit();
-    const path = args.next() orelse "PngSuite/basn0g08.png";
     const path = args.next() orelse "PngSuite/basn0g04.png";
 
     // open file and get readers
