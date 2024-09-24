@@ -222,6 +222,7 @@ fn handle_IDAT(allocator: std.mem.Allocator, img_data: *png_data, buf: []u8) !vo
 
     const byte_width = img_data.width * img_data.bpp; // number ob bytes per scanline
     var pixel_data = try allocator.alloc(u8, img_data.height * byte_width);
+    img_data.pixels = pixel_data;
 
     for (0..img_data.height) |y| {
         const filter_type = try br.readBits(u8, 8, &out_bits);
@@ -230,32 +231,57 @@ fn handle_IDAT(allocator: std.mem.Allocator, img_data: *png_data, buf: []u8) !vo
         for (0..byte_width) |x| {
             pixel_data[img_data.width * y + x] = try br.readBits(u8, img_data.bit_depth, &out_bits);
         }
-        handleFilter(filter_type, pixel_data[byte_width * y .. byte_width * y + byte_width].ptr, img_data);
+        handleFilter(filter_type, pixel_data[byte_width * y .. byte_width * y + byte_width].ptr, y, img_data);
         std.mem.reverse(u8, pixel_data[byte_width * y .. byte_width * y + byte_width]);
     }
-    img_data.pixels = pixel_data;
 }
 
-fn handleFilter(filter: u8, buf: [*]u8, img_data: *png_data) void {
+fn handleFilter(filter: u8, scanline: [*]u8, current_height: usize, img_data: *png_data) void {
+    const prev_scanline = img_data.getScanline(current_height -| 1);
     switch (filter) {
         0 => return,
         1 => {
             for (0..img_data.width - 1) |x| {
-                const i = x -% img_data.bpp;
-                const sub = buf[i];
-                buf[x] +%= sub;
+                const i = @mod((x -% img_data.bpp), img_data.width);
+                const prev = scanline[i];
+                scanline[x] +%= prev;
             }
         },
         2 => {
-            unreachable;
+            for (0..img_data.width - 1) |x| {
+                scanline[x] +%= prev_scanline[x];
+            }
         },
         3 => {
-            unreachable;
+            for (0..img_data.width - 1) |x| {
+                const i = @mod((x -% img_data.bpp), img_data.width);
+                const prev = scanline[i];
+                const above = prev_scanline[x];
+                scanline[x] +%= @divFloor(prev, above);
+            }
         },
         4 => {
-            unreachable;
+            for (0..img_data.width - 1) |x| {
+                const i = @mod((x -% img_data.bpp), img_data.width);
+                std.log.debug("i={d}", .{i});
+                const prev = scanline[i];
+                const above = prev_scanline[x];
+                const diag = prev_scanline[i];
+
+                scanline[x] +%= paeth(prev, above, diag);
+            }
         },
         else => unreachable,
     }
     return;
+}
+
+fn paeth(a: u8, b: u8, c: u8) u8 {
+    const p: i16 = @as(i16, @intCast(a)) + b - c;
+    const pa = @abs(p - a);
+    const pb = @abs(p - b);
+    const pc = @abs(p - c);
+    if (pa <= pb and pa <= pc) return a;
+    if (pb <= pc) return b;
+    return c;
 }

@@ -34,7 +34,7 @@ fn drawPixelScaledRL(x: u32, y: u32, scaleX: u32, scaleY: u32, color: rl.Color) 
 }
 
 fn getPixelRLColor(pixel: u8, img_data: *png.png_data) !rl.Color {
-    const max_val = @as(f32, @floatFromInt(std.math.pow(u8, 2, img_data.bit_depth) - 1));
+    const max_val = @as(f32, @floatFromInt(std.math.pow(u16, 2, img_data.bit_depth) - 1));
 
     switch (img_data.color) {
         0 => {
@@ -56,10 +56,14 @@ pub fn renderPngToWriter(writer: anytype, width: u32, height: u32, img_data: *pn
             const pixel = img_data.getPixel(x, y);
             try drawPixelANSI(try getPixelRLColor(pixel, img_data), writer);
         }
+        _ = try writer.write("\n");
     }
 }
 
 fn drawPixelANSI(color: rl.Color, writer: anytype) !void {
-    _ = color;
-    _ = try writer.write("asdf");
+    _ = try writer.write(&[_]u8{0x1B});
+    try std.fmt.format(writer, "[48;2;{d};{d};{d}m", .{ color.r, color.g, color.b });
+    _ = try writer.write("  ");
+    _ = try writer.write(&[_]u8{0x1B});
+    _ = try writer.write("[0m");
 }
