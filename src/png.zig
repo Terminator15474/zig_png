@@ -1,6 +1,7 @@
 const std = @import("std");
 const assert = std.debug.assert;
 const render = @import("render.zig");
+const rl = @import("raylib");
 
 pub const png_error = error{
     FileIsNoPng,
@@ -59,6 +60,31 @@ pub const png_error = error{
     Utf8CodepointTooLarge,
 };
 
+pub const Color = struct {
+    const Self = @This();
+
+    r: u8,
+    g: u8,
+    b: u8,
+    a: u8,
+
+    pub fn toRLColor(self: *Self) rl.Color {
+        return rl.Color.init(self.r, self.g, self.b, self.a);
+    }
+
+    pub fn init(r: u8, g: u8, b: u8, a: u8) Color {
+        return Color{ .r = r, .g = g, .b = b, .a = a };
+    }
+
+    pub fn fromGrayscale(pixel: u8, bit_depth: u8) Color {
+        const max_val = @as(f32, @floatFromInt(std.math.pow(u16, 2, bit_depth) - 1));
+        const f32_pixel = @as(f32, @floatFromInt(pixel));
+        const scaled_float: f32 = f32_pixel / max_val;
+        const scaled_int = @as(u8, @intFromFloat(scaled_float * 255.0));
+        return Color.init(scaled_int, scaled_int, scaled_int, 255);
+    }
+};
+
 pub const png_data = struct {
     const Self = @This();
 
@@ -70,18 +96,18 @@ pub const png_data = struct {
     filter: u8,
     interlace: u8,
     bpp: u8,
-    pixels: ?[]u8,
+    pixels: ?[]Color,
 
-    pub fn getPixel(self: *Self, x: usize, y: usize) u8 {
-        if (self.pixels) |pixels| {
-            return pixels[self.width * y + (self.width - x - 1)];
+    pub fn getPixel(self: *Self, x: usize, y: usize) Color {
+        if (self.pixels) |p| {
+            return p[self.width * y + (self.width - x - 1)];
         } else {
-            return 0;
+            return Color.init(0, 0, 0, 0);
         }
     }
 
-    pub fn getScanline(self: *Self, y: usize) []u8 {
-        assert(y <= self.height);
+    pub fn getScanline(self: *Self, y: usize) []Color {
+        assert(y < self.height);
         if (self.pixels) |pixels| {
             return pixels[self.width * y .. self.width * y + self.height];
         } else {
@@ -208,7 +234,7 @@ fn handle_IDAT(allocator: std.mem.Allocator, img_data: *png_data, buf: []u8) !vo
 
     var in_stream = std.io.fixedBufferStream(buf);
     const reader = in_stream.reader();
-    const data = try allocator.alloc(u8, img_data.width * img_data.height * 2);
+    const data = try allocator.alloc(u8, img_data.width * img_data.height * img_data.bpp * 2);
     var out_stream = std.io.fixedBufferStream(data);
     const writer = out_stream.writer();
 
@@ -222,7 +248,7 @@ fn handle_IDAT(allocator: std.mem.Allocator, img_data: *png_data, buf: []u8) !vo
 
     const byte_width = img_data.width * img_data.bpp; // number ob bytes per scanline
     var pixel_data = try allocator.alloc(u8, img_data.height * byte_width);
-    img_data.pixels = pixel_data;
+    var prev_scanline = try allocator.alloc(u8, byte_width);
 
     for (0..img_data.height) |y| {
         const filter_type = try br.readBits(u8, 8, &out_bits);
@@ -231,13 +257,31 @@ fn handle_IDAT(allocator: std.mem.Allocator, img_data: *png_data, buf: []u8) !vo
         for (0..byte_width) |x| {
             pixel_data[img_data.width * y + x] = try br.readBits(u8, img_data.bit_depth, &out_bits);
         }
-        handleFilter(filter_type, pixel_data[byte_width * y .. byte_width * y + byte_width].ptr, y, img_data);
+        handleFilter(filter_type, pixel_data[byte_width * y .. byte_width * y + byte_width].ptr, prev_scanline, img_data);
+        prev_scanline = pixel_data[byte_width * y .. byte_width * y + byte_width];
         std.mem.reverse(u8, pixel_data[byte_width * y .. byte_width * y + byte_width]);
     }
+
+    var color_data = try allocator.alloc(Color, img_data.width * img_data.height);
+    var y_pos: u32 = 0;
+    for (0..color_data.len) |i| {
+        switch (img_data.color) {
+            0 => {
+                color_data[i] = Color.fromGrayscale(pixel_data[i], img_data.bit_depth);
+            },
+            2 => {
+                const h = y_pos * img_data.width;
+                color_data[i] = Color.init(pixel_data[h + i], pixel_data[h + i + 1], pixel_data[h + i + 2], 255);
+            },
+            else => unreachable,
+        }
+        y_pos += 1;
+        y_pos %= img_data.width;
+    }
+    img_data.pixels = color_data;
 }
 
-fn handleFilter(filter: u8, scanline: [*]u8, current_height: usize, img_data: *png_data) void {
-    const prev_scanline = img_data.getScanline(current_height -| 1);
+fn handleFilter(filter: u8, scanline: [*]u8, prev_scanline: []u8, img_data: *png_data) void {
     switch (filter) {
         0 => return,
         1 => {
@@ -263,7 +307,6 @@ fn handleFilter(filter: u8, scanline: [*]u8, current_height: usize, img_data: *p
         4 => {
             for (0..img_data.width - 1) |x| {
                 const i = @mod((x -% img_data.bpp), img_data.width);
-                std.log.debug("i={d}", .{i});
                 const prev = scanline[i];
                 const above = prev_scanline[x];
                 const diag = prev_scanline[i];
@@ -276,12 +319,17 @@ fn handleFilter(filter: u8, scanline: [*]u8, current_height: usize, img_data: *p
     return;
 }
 
-fn paeth(a: u8, b: u8, c: u8) u8 {
-    const p: i16 = @as(i16, @intCast(a)) + b - c;
-    const pa = @abs(p - a);
-    const pb = @abs(p - b);
-    const pc = @abs(p - c);
-    if (pa <= pb and pa <= pc) return a;
-    if (pb <= pc) return b;
-    return c;
+fn paeth(b4: u8, up: u8, b4_up: u8) u8 {
+    const p: i16 = @as(i16, @intCast(b4)) + up - b4_up;
+    const pa = @abs(p - b4);
+    const pb = @abs(p - up);
+    const pc = @abs(p - b4_up);
+
+    if (pa <= pb and pa <= pc) {
+        return b4;
+    } else if (pb <= pc) {
+        return up;
+    } else {
+        return b4_up;
+    }
 }

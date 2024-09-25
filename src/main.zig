@@ -11,13 +11,13 @@ pub fn main() !void {
     var args = try std.process.argsWithAllocator(alloc.allocator());
     _ = args.skip();
     defer args.deinit();
-    const path = args.next() orelse "PngSuite/basn0g08.png";
+    const path = args.next() orelse "PngSuite/basn2c08.png";
 
     // open file and get readers
     var file = try std.fs.cwd().openFile(path, .{});
     defer file.close();
     var img_data = try png.open(file.reader(), alloc.allocator());
 
-    // try render.renderPngInWindow(1920, 1080, &img_data);
     try render.renderPngToWriter(std.io.getStdOut().writer(), 1920, 1080, &img_data);
+    try render.renderPngInWindow(1920, 1080, &img_data);
 }
