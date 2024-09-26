@@ -36,11 +36,12 @@ fn drawPixelScaledRL(x: u32, y: u32, scaleX: u32, scaleY: u32, color: rl.Color) 
 pub fn renderPngToWriter(writer: anytype, width: u32, height: u32, img_data: *png.png_data) !void {
     _ = width;
     _ = height;
-    for (0..img_data.width) |x| {
-        for (0..img_data.height) |y| {
+    for (0..img_data.height) |y| {
+        for (0..img_data.width) |x| {
             const pixel = img_data.getPixel(x, y);
             try drawPixelANSI(pixel, writer);
         }
+        try resetAnsiColors(writer);
         _ = try writer.write("\n");
     }
 }
@@ -49,6 +50,9 @@ fn drawPixelANSI(color: png.Color, writer: anytype) !void {
     _ = try writer.write(&[_]u8{0x1B});
     try std.fmt.format(writer, "[48;2;{d};{d};{d}m", .{ color.r, color.g, color.b });
     _ = try writer.write("  ");
+}
+
+inline fn resetAnsiColors(writer: anytype) !void {
     _ = try writer.write(&[_]u8{0x1B});
     _ = try writer.write("[0m");
 }
