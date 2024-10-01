@@ -286,7 +286,7 @@ fn handleFilter(filter: u8, scanline: [*]u8, prev_scanline: []u8, img_data: *png
         0 => return,
         1 => {
             for (0..img_data.width - 1) |x| {
-                const i = @mod((x -% img_data.bpp), img_data.width);
+                const i = if (x >= img_data.bpp) x - img_data.bpp else 0;
                 const prev = scanline[i];
                 scanline[x] +%= prev;
             }
@@ -298,7 +298,7 @@ fn handleFilter(filter: u8, scanline: [*]u8, prev_scanline: []u8, img_data: *png
         },
         3 => {
             for (0..img_data.width - 1) |x| {
-                const i = @mod((x -% img_data.bpp), img_data.width);
+                const i = if (x >= img_data.bpp) x - img_data.bpp else 0;
                 const prev = scanline[i];
                 const above = prev_scanline[x];
                 scanline[x] +%= @divFloor(prev, above);
@@ -306,7 +306,7 @@ fn handleFilter(filter: u8, scanline: [*]u8, prev_scanline: []u8, img_data: *png
         },
         4 => {
             for (0..img_data.width - 1) |x| {
-                const i = @mod((x -% img_data.bpp), img_data.width);
+                const i = if (x >= img_data.bpp) x - img_data.bpp else 0;
                 const prev = scanline[i];
                 const above = prev_scanline[x];
                 const diag = prev_scanline[i];
