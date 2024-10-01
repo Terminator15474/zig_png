@@ -95,6 +95,7 @@ pub const png_data = struct {
     compression: u8,
     filter: u8,
     interlace: u8,
+    channels: u8,
     bpp: u8,
     pixels: ?[]Color,
 
@@ -149,6 +150,7 @@ pub fn open(file_reader: anytype, allocator: std.mem.Allocator) png_error!png_da
         .compression = 0,
         .filter = 0,
         .interlace = 0,
+        .channels = 0,
         .bpp = 0,
         .pixels = null,
     };
@@ -173,7 +175,7 @@ pub fn open(file_reader: anytype, allocator: std.mem.Allocator) png_error!png_da
                 std.log.debug("IDAT: {d}; data_buffer: {d}", .{ IDAT_data.len, data_buffer.len });
             },
             IEND => try handle_IDAT(allocator, &image_data, IDAT_data),
-            else => _ = 0,
+            else => std.log.debug("Got chunk: {s}", .{@as([4]u8, @bitCast(chunk_type))}),
         }
 
         crc_expected = try reader.readInt(u32, .big);
@@ -201,19 +203,17 @@ fn handle_IHDR(buf: []u8) png_error!png_data {
     const filter = try reader.readInt(u8, .big);
     const interlace = try reader.readInt(u8, .big);
 
-    var bpp: u8 = bit_depth;
+    var channels: u8 = 0;
     // cannot just return something at runtime :(
     switch (color) {
         // returns number of chanels
-        inline 0 => bpp *= 1,
-        inline 2 => bpp *= 3,
-        inline 3 => bpp *= 3,
-        inline 4 => bpp *= 2,
-        inline 6 => bpp *= 4,
+        inline 0 => channels = 1,
+        inline 2 => channels = 3,
+        inline 3 => channels = 3,
+        inline 4 => channels = 2,
+        inline 6 => channels = 4,
         else => unreachable,
     }
-    bpp = try std.math.divCeil(u8, bpp, 8);
-
     const data = png_data{
         .width = width,
         .height = height,
@@ -222,9 +222,11 @@ fn handle_IHDR(buf: []u8) png_error!png_data {
         .compression = compression,
         .filter = filter,
         .interlace = interlace,
-        .bpp = bpp,
+        .channels = channels,
+        .bpp = channels * try std.math.divCeil(u8, bit_depth, 8),
         .pixels = null,
     };
+
     std.log.debug("IDAT: {any}", .{data});
     return data;
 }
@@ -233,8 +235,8 @@ fn handle_IDAT(allocator: std.mem.Allocator, img_data: *png_data, buf: []u8) !vo
     std.log.debug("\n----------------------------------- PARSING IDAT ---------------------------------\n", .{});
 
     var in_stream = std.io.fixedBufferStream(buf);
-    const reader = in_stream.reader();
-    const data = try allocator.alloc(u8, img_data.width * img_data.height * img_data.bpp * 2);
+    const reader = in_stream.reader(); //                                           filter byte
+    const data = try allocator.alloc(u8, img_data.width * img_data.height * img_data.bpp + img_data.height);
     var out_stream = std.io.fixedBufferStream(data);
     const writer = out_stream.writer();
 
